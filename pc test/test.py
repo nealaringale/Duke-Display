@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 from bleak import BleakClient, BleakScanner
@@ -8,20 +9,29 @@ from bleak import BleakClient, BleakScanner
 SERVICE_UUID = "8f8a0001-5d3e-4d0a-9c7b-000000000001"
 DATA_UUID = "8f8a0002-5d3e-4d0a-9c7b-000000000002"
 FRAME_PREFIX = "DD1"
+
 ORANGE = "#ff6500"
 BG = "#050505"
 CARD = "#111111"
+CARD2 = "#161616"
 TEXT = "#f7f7f7"
 MUTED = "#919191"
 GREEN = "#5cd274"
 RED = "#ff5c5c"
 AMBER = "#ffb000"
+CALL_BG = "#220d0d"
+MESSAGE_TIMEOUT_MS = 5000
+FRAME_TIMEOUT_SECONDS = 5.0
 
 
 def parse_payload(raw: str):
     data = {
-        "nav": {}, "music": {}, "msg": {}, "time": "--:--",
-        "battery": -1, "charging": False, "conn": "DISCONNECTED", "call": {}
+        "time": "--:--", "battery": -1, "charging": False,
+        "conn": "DISCONNECTED",
+        "nav": {"direction": "", "distance": -1, "instruction": "", "road": "", "eta": "", "destination_distance": -1, "active": False},
+        "music": {"title": "", "artist": "", "state": "PAUSED"},
+        "msg": {"app": "", "text": "", "timestamp": 0},
+        "call": {"active": False, "caller": ""},
     }
     for line in raw.splitlines():
         parts = line.split("|")
@@ -47,11 +57,7 @@ def parse_payload(raw: str):
                 destination_distance = int(parts[6])
             except ValueError:
                 destination_distance = -1
-            data["nav"] = {
-                "direction": parts[1], "distance": distance, "instruction": parts[3],
-                "road": parts[4], "eta": parts[5], "destination_distance": destination_distance,
-                "active": parts[7] == "ACTIVE"
-            }
+            data["nav"] = {"direction": parts[1], "distance": distance, "instruction": parts[3], "road": parts[4], "eta": parts[5], "destination_distance": destination_distance, "active": parts[7] == "ACTIVE"}
         elif kind == "MUSIC" and len(parts) >= 4:
             data["music"] = {"title": parts[1], "artist": parts[2], "state": parts[3]}
         elif kind == "MSG" and len(parts) >= 4:
@@ -65,38 +71,43 @@ def parse_payload(raw: str):
     return data
 
 
-def direction_display(direction: str):
-    arrows = {
+def direction_display(direction: str) -> str:
+    return {
         "RIGHT": "↗  RIGHT", "LEFT": "↖  LEFT", "SLIGHT_RIGHT": "↗  SLIGHT RIGHT", "SLIGHT_LEFT": "↖  SLIGHT LEFT",
         "SHARP_RIGHT": "↗  SHARP RIGHT", "SHARP_LEFT": "↖  SHARP LEFT", "UTURN": "↶  U-TURN",
         "KEEP_RIGHT": "↗  KEEP RIGHT", "KEEP_LEFT": "↖  KEEP LEFT", "ARRIVE": "●  ARRIVE", "ROUNDABOUT": "↻  ROUNDABOUT",
         "NORTH": "↑  HEAD NORTH", "SOUTH": "↓  HEAD SOUTH", "EAST": "→  HEAD EAST", "WEST": "←  HEAD WEST",
-    }
-    return arrows.get(direction, "↑  STRAIGHT")
+    }.get(direction, "↑  STRAIGHT")
 
 
 class DukeDashPC:
+    """PC simulator for the real Duke Dash BLE/TFT display."""
+
     def __init__(self, root):
         self.root = root
         self.root.title("Duke Dash — PC Display Prototype")
-        self.root.geometry("820x760")
-        self.root.minsize(680, 650)
+        self.root.geometry("900x820")
+        self.root.minsize(720, 680)
         self.root.configure(bg=BG)
         self.stop_event = threading.Event()
         self.client = None
         self.loop = None
         self.notification_after = None
+        self.message_generation = 0
         self.frame_buffers = {}
-        self.latest_message_timestamp = 0
 
         style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TButton", background="#161616", foreground=TEXT, bordercolor="#303030", padding=10, font=("Segoe UI", 10, "bold"))
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("TButton", background=CARD2, foreground=TEXT, bordercolor="#303030", padding=10, font=("Segoe UI", 10, "bold"))
         style.map("TButton", background=[("active", "#252525")])
 
         self.build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.start_ble_thread()
+        self.root.after(1000, self.prune_frames)
 
     def build_ui(self):
         outer = tk.Frame(self.root, bg=BG)
@@ -118,11 +129,12 @@ class DukeDashPC:
         self.nav_card, self.nav_title, self.nav_meta = self.card(outer, "NAVIGATION")
         self.music_card, self.music_title, self.music_meta = self.card(outer, "NOW PLAYING")
         self.msg_card, self.msg_title, self.msg_meta = self.card(outer, "MESSAGING")
-        self.call_card = tk.Frame(outer, bg="#220d0d", highlightbackground=RED, highlightthickness=1)
-        call_inner = tk.Frame(self.call_card, bg="#220d0d")
+
+        self.call_card = tk.Frame(outer, bg=CALL_BG, highlightbackground=RED, highlightthickness=1)
+        call_inner = tk.Frame(self.call_card, bg=CALL_BG)
         call_inner.pack(fill="x", padx=20, pady=16)
-        tk.Label(call_inner, text="📞 INCOMING CALL", bg="#220d0d", fg=RED, font=("Segoe UI", 12, "bold")).pack(anchor="w")
-        self.call_name = tk.Label(call_inner, text="", bg="#220d0d", fg=TEXT, font=("Segoe UI", 22, "bold"))
+        tk.Label(call_inner, text="📞 INCOMING CALL", bg=CALL_BG, fg=RED, font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        self.call_name = tk.Label(call_inner, text="", bg=CALL_BG, fg=TEXT, font=("Segoe UI", 22, "bold"))
         self.call_name.pack(anchor="w", pady=(4, 0))
 
         footer = tk.Frame(outer, bg=BG)
@@ -138,13 +150,12 @@ class DukeDashPC:
         tk.Label(inner, text=heading, bg=CARD, fg=ORANGE, font=("Segoe UI", 11, "bold")).pack(anchor="w")
         title = tk.Label(inner, text="—", bg=CARD, fg=TEXT, font=("Segoe UI", 25, "bold"), anchor="w", justify="left")
         title.pack(fill="x", pady=(8, 3))
-        meta = tk.Label(inner, text="Waiting for phone data...", bg=CARD, fg=MUTED, font=("Segoe UI", 12), anchor="w", justify="left", wraplength=720)
+        meta = tk.Label(inner, text="Waiting for phone data...", bg=CARD, fg=MUTED, font=("Segoe UI", 12), anchor="w", justify="left", wraplength=780)
         meta.pack(fill="x")
         return frame, title, meta
 
     def start_ble_thread(self):
-        self.ble_thread = threading.Thread(target=self.ble_worker, daemon=True)
-        self.ble_thread.start()
+        threading.Thread(target=self.ble_worker, daemon=True).start()
 
     def ble_worker(self):
         self.loop = asyncio.new_event_loop()
@@ -155,6 +166,7 @@ class DukeDashPC:
             self.ui_status(f"●  BLE ERROR: {exc}", RED)
         finally:
             self.loop.close()
+            self.loop = None
 
     async def scan_and_connect(self):
         while not self.stop_event.is_set():
@@ -162,12 +174,12 @@ class DukeDashPC:
             target = None
             seen = []
             try:
-                devices = await BleakScanner.discover(timeout=8.0, return_adv=True)
+                devices = await BleakScanner.discover(timeout=6.0, return_adv=True)
                 for device, advertisement in devices.values():
                     name = device.name or getattr(advertisement, "local_name", None) or ""
-                    service_uuids = [str(u).lower() for u in (getattr(advertisement, "service_uuids", None) or [])]
-                    seen.append(name or device.address)
-                    if SERVICE_UUID.lower() in service_uuids or "duke dash" in name.lower():
+                    uuids = [str(u).lower() for u in (getattr(advertisement, "service_uuids", None) or [])]
+                    seen.append(name or getattr(device, "address", "unknown"))
+                    if SERVICE_UUID.lower() in uuids or "duke dash" in name.lower():
                         target = device
                         break
             except Exception as exc:
@@ -187,20 +199,23 @@ class DukeDashPC:
             try:
                 async with BleakClient(target, disconnected_callback=self.on_disconnected) as client:
                     self.client = client
+                    self.frame_buffers.clear()
                     self.ui_status("●  PHONE DATA LIVE", GREEN)
                     await client.start_notify(DATA_UUID, self.notification_handler)
                     try:
                         value = await client.read_gatt_char(DATA_UUID)
                         self.accept_payload(bytes(value))
-                    except Exception as exc:
-                        self.ui_status(f"●  CONNECTED — LIVE DATA WAITING ({exc})", AMBER)
+                    except Exception:
+                        pass
                     while client.is_connected and not self.stop_event.is_set():
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.25)
             except Exception as exc:
-                self.ui_status(f"●  CONNECTION ERROR: {exc}", RED)
-                await asyncio.sleep(2)
+                if not self.stop_event.is_set():
+                    self.ui_status(f"●  CONNECTION ERROR: {exc}", RED)
+                    await asyncio.sleep(2)
             finally:
                 self.client = None
+                self.frame_buffers.clear()
 
     def notification_handler(self, _characteristic, value):
         try:
@@ -219,22 +234,21 @@ class DukeDashPC:
             return
         _, frame_id, seq_text, total_text, encoded_chunk = parts
         try:
-            seq = int(seq_text)
-            total = int(total_text)
-            if total <= 0 or seq < 1 or seq > total:
-                return
+            seq, total = int(seq_text), int(total_text)
         except ValueError:
             return
-
-        buffer = self.frame_buffers.setdefault(frame_id, {"total": total, "chunks": {}})
-        if buffer["total"] != total:
-            self.frame_buffers.pop(frame_id, None)
+        if total <= 0 or seq < 1 or seq > total or total > 256:
             return
+
+        now = time.monotonic()
+        buffer = self.frame_buffers.get(frame_id)
+        if buffer is None or buffer["total"] != total:
+            buffer = {"total": total, "chunks": {}, "created": now}
+            self.frame_buffers[frame_id] = buffer
         buffer["chunks"][seq] = encoded_chunk
 
-        # Keep only a few in-flight frames so a bad/disconnected session cannot grow memory.
-        if len(self.frame_buffers) > 4:
-            oldest = next(iter(self.frame_buffers))
+        if len(self.frame_buffers) > 8:
+            oldest = min(self.frame_buffers, key=lambda key: self.frame_buffers[key]["created"])
             if oldest != frame_id:
                 self.frame_buffers.pop(oldest, None)
 
@@ -252,52 +266,59 @@ class DukeDashPC:
         self.frame_buffers.pop(frame_id, None)
         self.root.after(0, self.update_display, parse_payload(raw))
 
+    def prune_frames(self):
+        now = time.monotonic()
+        for frame_id, buffer in list(self.frame_buffers.items()):
+            if now - buffer["created"] > FRAME_TIMEOUT_SECONDS:
+                self.frame_buffers.pop(frame_id, None)
+        if not self.stop_event.is_set():
+            self.root.after(1000, self.prune_frames)
+
     def on_disconnected(self, _client):
-        self.ui_status("○  PHONE DISCONNECTED — RECONNECTING...", AMBER)
+        if not self.stop_event.is_set():
+            self.ui_status("○  PHONE DISCONNECTED — RECONNECTING...", AMBER)
 
     def update_display(self, data):
         battery = data.get("battery", -1)
         battery_text = "--%" if battery < 0 else f"{battery}%"
-        conn = data.get("conn", "DISCONNECTED")
-        conn_dot = "●" if conn == "CONNECTED" else "●"
-        top_color = GREEN if conn == "CONNECTED" else AMBER
+        connected = data.get("conn") == "CONNECTED"
         charging = " ⚡" if data.get("charging") else ""
-        self.top_info.config(text=f"{data.get('time', '--:--')}   {conn_dot}   🔋 {battery_text}{charging}", fg=top_color)
+        self.top_info.config(text=f"{data.get('time', '--:--')}   ●   🔋 {battery_text}{charging}", fg=GREEN if connected else AMBER)
 
-        nav = data["nav"]
+        nav = data.get("nav", {})
         active = nav.get("active", False)
         self.nav_title.config(text=direction_display(nav.get("direction", "")) if active else "NO NAVIGATION")
-        distance = nav.get("distance", -1)
         meta = []
-        if distance >= 0:
-            meta.append(f"{distance} m")
+        if nav.get("distance", -1) >= 0:
+            meta.append(f"{nav['distance']} m")
         if nav.get("instruction"):
-            meta.append(nav.get("instruction"))
+            meta.append(nav["instruction"])
         if nav.get("road"):
-            meta.append(nav.get("road"))
+            meta.append(nav["road"])
         if nav.get("eta"):
-            meta.append(f"ETA {nav.get('eta')}")
+            meta.append(f"ETA {nav['eta']}")
         if nav.get("destination_distance", -1) >= 0:
-            meta.append(f"DEST {nav.get('destination_distance')} m")
+            meta.append(f"DEST {nav['destination_distance']} m")
         self.nav_meta.config(text="  •  ".join(meta) if meta else ("Waiting for Google Maps..." if active else "Start navigation on your phone"))
 
-        music = data["music"]
+        music = data.get("music", {})
         title = music.get("title", "")
-        artist = music.get("artist", "")
-        state = music.get("state", "")
-        self.music_title.config(text=title if title else "No active music")
-        self.music_meta.config(text=f"{artist or 'Unknown artist'}  •  {state}" if title else "Start music on your phone")
+        self.music_title.config(text=title or "No active music")
+        self.music_meta.config(text=f"{music.get('artist') or 'Unknown artist'}  •  {music.get('state', '')}" if title else "Start music on your phone")
 
-        msg = data["msg"]
-        timestamp = msg.get("timestamp", 0)
+        msg = data.get("msg", {})
         if msg.get("app"):
-            self.latest_message_timestamp = timestamp
+            self.message_generation += 1
+            generation = self.message_generation
             self.msg_title.config(text=msg.get("text") or "New message")
             self.msg_meta.config(text=msg.get("app", "").upper())
             if self.notification_after:
-                self.root.after_cancel(self.notification_after)
-            self.notification_after = self.root.after(5000, self.hide_message)
-        else:
+                try:
+                    self.root.after_cancel(self.notification_after)
+                except tk.TclError:
+                    pass
+            self.notification_after = self.root.after(MESSAGE_TIMEOUT_MS, lambda: self.hide_message(generation))
+        elif not self.call_card.winfo_ismapped():
             self.hide_message()
 
         call = data.get("call", {})
@@ -310,11 +331,14 @@ class DukeDashPC:
 
         if battery >= 0 and battery < 10:
             self.ui_status("●  PHONE BATTERY LOW", RED)
+        elif connected:
+            self.ui_status("●  PHONE DATA LIVE", GREEN)
 
-    def hide_message(self):
+    def hide_message(self, generation=None):
+        if generation is not None and generation != self.message_generation:
+            return
         self.msg_title.config(text="No new messages")
         self.msg_meta.config(text="Supported messaging apps only")
-        self.latest_message_timestamp = 0
         self.notification_after = None
 
     def hide_call(self):
@@ -326,23 +350,42 @@ class DukeDashPC:
     def ui_status(self, text, color):
         try:
             self.root.after(0, lambda: self.status.config(text=text, fg=color))
-        except tk.TclError:
+        except (RuntimeError, tk.TclError):
             pass
 
     def rescan(self):
         self.ui_status("●  RESCANNING FOR DUKE DASH...", MUTED)
+        self.frame_buffers.clear()
+        self.message_generation += 1
+        if self.loop and self.loop.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(self.disconnect_current(), self.loop)
+            except Exception:
+                pass
+
+    async def disconnect_current(self):
+        if self.client is not None:
+            try:
+                await self.client.disconnect()
+            except Exception:
+                pass
 
     def close(self):
         self.stop_event.set()
-        try:
-            if self.notification_after:
-                self.root.after_cancel(self.notification_after)
-        except tk.TclError:
-            pass
+        self.frame_buffers.clear()
+        if self.loop and self.loop.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(self.disconnect_current(), self.loop)
+            except Exception:
+                pass
         self.root.destroy()
 
 
-if __name__ == "__main__":
+def main():
     root = tk.Tk()
-    app = DukeDashPC(root)
+    DukeDashPC(root)
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
