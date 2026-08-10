@@ -6,6 +6,8 @@ import android.content.Intent
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import java.util.Locale
@@ -25,6 +27,11 @@ class DashNotificationListener : NotificationListenerService() {
             "com.snapchat.android" to "Snapchat"
         )
     }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var messageClearRunnable: Runnable? = null
+    private var navigationClearRunnable: Runnable? = null
+    private var navigationGeneration = 0L
 
     private var mediaManager: MediaSessionManager? = null
     private var mediaListener: MediaSessionManager.OnActiveSessionsChangedListener? = null
@@ -52,6 +59,8 @@ class DashNotificationListener : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        messageClearRunnable?.let(mainHandler::removeCallbacks)
+        navigationClearRunnable?.let(mainHandler::removeCallbacks)
         clearMediaController()
         mediaListener?.let { listener ->
             try { mediaManager?.removeOnActiveSessionsChangedListener(listener) } catch (_: Exception) {}
@@ -59,7 +68,9 @@ class DashNotificationListener : NotificationListenerService() {
         mediaListener = null
         mediaManager = null
         DashState.music = MusicState()
+        DashState.message = MessageState()
         DashState.call = CallState()
+        DashState.navigation = NavigationState()
         DashState.changed()
         instance = null
         super.onDestroy()
@@ -69,15 +80,21 @@ class DashNotificationListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         if (sbn.packageName == "com.google.android.apps.maps") {
-            // Maps may remove/repost its navigation notification. Leave the last
-            // instruction briefly available rather than flashing the display.
+            val generation = navigationGeneration
+            navigationClearRunnable?.let(mainHandler::removeCallbacks)
+            navigationClearRunnable = Runnable {
+                if (generation == navigationGeneration) {
+                    DashState.navigation = NavigationState()
+                    DashState.changed()
+                }
+            }
+            mainHandler.postDelayed(navigationClearRunnable!!, 3000L)
             return
         }
-        if (sbn.notification.category == Notification.CATEGORY_CALL) {
-            if (DashState.call.active) {
-                DashState.call = CallState()
-                DashState.changed()
-            }
+
+        if (sbn.notification.category == Notification.CATEGORY_CALL && DashState.call.active) {
+            DashState.call = CallState()
+            DashState.changed()
         }
     }
 
@@ -93,7 +110,7 @@ class DashNotificationListener : NotificationListenerService() {
             val level = intent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
             val scale = intent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100)
             val status = intent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1)
-            val pct = if (level >= 0 && scale > 0) (level * 100 / scale) else -1
+            val pct = if (level >= 0 && scale > 0) (level * 100 / scale).coerceIn(0, 100) else -1
             val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
                 status == android.os.BatteryManager.BATTERY_STATUS_FULL
             if (pct != DashState.phoneBattery || charging != DashState.phoneCharging) {
@@ -111,7 +128,10 @@ class DashNotificationListener : NotificationListenerService() {
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
         val big = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
         val sub = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
-        val parts = listOf(title, text, big, sub).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        val parts = listOf(title, text, big, sub)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
 
         if (sbn.notification.category == Notification.CATEGORY_CALL) {
             val caller = parts.firstOrNull().orEmpty().ifBlank { "Incoming call" }
@@ -123,6 +143,8 @@ class DashNotificationListener : NotificationListenerService() {
         if (pkg == "com.google.android.apps.maps") {
             val raw = parts.joinToString(" — ")
             if (raw.isNotBlank()) {
+                navigationGeneration++
+                navigationClearRunnable?.let(mainHandler::removeCallbacks)
                 DashState.navigation = NavigationParser.parse(raw)
                 DashState.changed()
             }
@@ -132,8 +154,18 @@ class DashNotificationListener : NotificationListenerService() {
         val appName = MESSAGE_APPS[pkg] ?: return
         val body = parts.joinToString(" — ")
         if (body.isNotBlank()) {
+            messageClearRunnable?.let(mainHandler::removeCallbacks)
             DashState.message = MessageState(appName, body, System.currentTimeMillis())
             DashState.changed()
+            messageClearRunnable = Runnable {
+                if (DashState.message.timestamp != 0L &&
+                    System.currentTimeMillis() - DashState.message.timestamp >= 5000L
+                ) {
+                    DashState.message = MessageState()
+                    DashState.changed()
+                }
+            }
+            mainHandler.postDelayed(messageClearRunnable!!, 5000L)
         }
     }
 
@@ -142,13 +174,12 @@ class DashNotificationListener : NotificationListenerService() {
             mediaManager = getSystemService(MediaSessionManager::class.java)
             val component = ComponentName(this, DashNotificationListener::class.java)
             val listener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
-                attachBestController(controllers?.toList() ?: emptyList())
+                attachBestController(controllers?.toList().orEmpty())
             }
             mediaListener = listener
             mediaManager?.let { manager ->
                 manager.addOnActiveSessionsChangedListener(listener, component)
-                val controllers: List<MediaController> = manager.getActiveSessions(component)?.toList() ?: emptyList()
-                attachBestController(controllers)
+                attachBestController(manager.getActiveSessions(component)?.toList().orEmpty())
             }
         } catch (_: SecurityException) {
         } catch (_: Exception) {
@@ -156,13 +187,15 @@ class DashNotificationListener : NotificationListenerService() {
     }
 
     private fun attachBestController(controllers: List<MediaController>) {
-        val controller = controllers.sortedWith(
-            compareByDescending<MediaController> {
-                it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-            }.thenByDescending {
-                it.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().isNotBlank()
-            }
-        ).firstOrNull()
+        val controller = controllers
+            .sortedWith(
+                compareByDescending<MediaController> {
+                    it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+                }.thenByDescending {
+                    it.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().isNotBlank()
+                }
+            )
+            .firstOrNull()
 
         if (controller?.sessionToken == activeController?.sessionToken) {
             refreshMusic()
@@ -201,19 +234,30 @@ class DashNotificationListener : NotificationListenerService() {
     private fun refreshMusic() {
         val controller = activeController
         if (controller == null) {
-            if (DashState.music.title.isNotBlank() || DashState.music.artist.isNotBlank()) {
+            if (DashState.music != MusicState()) {
                 DashState.music = MusicState()
                 DashState.changed()
             }
             return
         }
+
         val metadata = controller.metadata
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().trim()
-        val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
-            ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST).orEmpty()
+        val artist = (
+            metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+                ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+        ).orEmpty().trim()
         val playing = controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-        if (title.isBlank() && artist.isBlank()) return
-        val next = MusicState(title, artist.orEmpty(), playing)
+
+        if (title.isBlank() && artist.isBlank()) {
+            if (DashState.music != MusicState()) {
+                DashState.music = MusicState()
+                DashState.changed()
+            }
+            return
+        }
+
+        val next = MusicState(title, artist, playing)
         if (next != DashState.music) {
             DashState.music = next
             DashState.changed()
@@ -222,6 +266,23 @@ class DashNotificationListener : NotificationListenerService() {
 }
 
 object NavigationParser {
+    private val distanceRegex = Regex(
+        """(?:(\\d+(?:\\.\\d+)?)\\s*(km|kilometer|kilometre|m|meter|metre))""",
+        RegexOption.IGNORE_CASE
+    )
+    private val etaClockRegex = Regex(
+        """(?:arrive|arrival|eta|reach).*?\\b(\\d{1,2}:\\d{2})\\b""",
+        RegexOption.IGNORE_CASE
+    )
+    private val durationRegex = Regex(
+        """\\b(\\d+)\\s*(min|mins|minute|minutes|h|hr|hour|hours)\\b""",
+        RegexOption.IGNORE_CASE
+    )
+    private val roadRegex = Regex(
+        """\\b(?:onto|on)\\s+(.+?)(?:\\s+(?:toward|for|in)\\b|$)""",
+        RegexOption.IGNORE_CASE
+    )
+
     fun parse(raw: String): NavigationState {
         val lower = raw.lowercase(Locale.US)
         val direction = when {
@@ -243,31 +304,50 @@ object NavigationParser {
             else -> "STRAIGHT"
         }
 
-        val distance = Regex("""(?:(\d+(?:\.\d+)?)\s*(km|kilometer|kilometre|m|meter|metre))""", RegexOption.IGNORE_CASE)
-            .find(raw)?.let {
-                val n = it.groupValues[1].toDoubleOrNull() ?: return@let null
-                val unit = it.groupValues[2].lowercase(Locale.US)
-                if (unit.startsWith("km") || unit.startsWith("kilo")) (n * 1000).toInt() else n.toInt()
-            }
+        val distance = distanceRegex.find(raw)?.let {
+            val number = it.groupValues[1].toDoubleOrNull() ?: return@let null
+            val unit = it.groupValues[2].lowercase(Locale.US)
+            if (unit.startsWith("km") || unit.startsWith("kilo")) (number * 1000.0).roundToIntSafe() else number.roundToIntSafe()
+        }
 
-        val eta = Regex("""(?:arrive|arrival|eta|reach).*?\b(\d{1,2}:\d{2})\b""", RegexOption.IGNORE_CASE)
-            .find(raw)?.groupValues?.getOrNull(1).orEmpty()
+        val etaFromClock = etaClockRegex.find(raw)?.groupValues?.getOrNull(1).orEmpty()
+        val eta = if (etaFromClock.isNotBlank()) {
+            etaFromClock
+        } else {
+            durationRegex.find(raw)?.let { match ->
+                val amount = match.groupValues[1].toLongOrNull() ?: return@let ""
+                val unit = match.groupValues[2].lowercase(Locale.US)
+                val minutes = if (unit.startsWith("h")) amount * 60 else amount
+                val calendar = Calendar.getInstance().apply { add(Calendar.MINUTE, minutes.toInt()) }
+                String.format(Locale.US, "%02d:%02d", calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE))
+            }.orEmpty()
+        }
 
-        val road = Regex("""\b(?:onto|on)\s+(.+?)(?:\s+(?:toward|for|in)\b|$)""", RegexOption.IGNORE_CASE)
-            .find(raw)?.groupValues?.getOrNull(1)?.trim().orEmpty()
-
-        val destinationDistance = if (lower.contains("destination") || lower.contains("arrive")) distance else null
+        val road = roadRegex.find(raw)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+        val destinationDistance = if (lower.contains("destination") || lower.contains("remaining")) distance else null
 
         val instruction = when (direction) {
-            "RIGHT" -> "TURN RIGHT"; "LEFT" -> "TURN LEFT"
-            "SLIGHT_RIGHT" -> "SLIGHT RIGHT"; "SLIGHT_LEFT" -> "SLIGHT LEFT"
-            "SHARP_RIGHT" -> "SHARP RIGHT"; "SHARP_LEFT" -> "SHARP LEFT"
-            "KEEP_RIGHT" -> "KEEP RIGHT"; "KEEP_LEFT" -> "KEEP LEFT"
-            "UTURN" -> "U-TURN"; "ROUNDABOUT" -> "ROUNDABOUT"; "ARRIVE" -> "ARRIVE"
-            "NORTH" -> "HEAD NORTH"; "SOUTH" -> "HEAD SOUTH"
-            "EAST" -> "HEAD EAST"; "WEST" -> "HEAD WEST"
+            "RIGHT" -> "TURN RIGHT"
+            "LEFT" -> "TURN LEFT"
+            "SLIGHT_RIGHT" -> "SLIGHT RIGHT"
+            "SLIGHT_LEFT" -> "SLIGHT LEFT"
+            "SHARP_RIGHT" -> "SHARP RIGHT"
+            "SHARP_LEFT" -> "SHARP LEFT"
+            "KEEP_RIGHT" -> "KEEP RIGHT"
+            "KEEP_LEFT" -> "KEEP LEFT"
+            "UTURN" -> "U-TURN"
+            "ROUNDABOUT" -> "ROUNDABOUT"
+            "ARRIVE" -> "ARRIVE"
+            "NORTH" -> "HEAD NORTH"
+            "SOUTH" -> "HEAD SOUTH"
+            "EAST" -> "HEAD EAST"
+            "WEST" -> "HEAD WEST"
             else -> "STRAIGHT"
         }
+
         return NavigationState(direction, distance, instruction, road, eta, destinationDistance, true, raw)
     }
+
+    private fun Double.roundToIntSafe(): Int =
+        coerceIn(0.0, Int.MAX_VALUE.toDouble()).toInt()
 }
