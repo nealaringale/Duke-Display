@@ -48,11 +48,7 @@ class DashBleService : Service() {
         }
 
         override fun onStartFailure(errorCode: Int) {
-            DashState.displayStarting = false
-            DashState.displayRunning = false
-            DashState.displayError = "BLE advertising error $errorCode"
-            DashState.phoneConnected = false
-            DashState.changed()
+            fail("BLE advertising error $errorCode")
         }
     }
 
@@ -66,6 +62,7 @@ class DashBleService : Service() {
         }
 
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) return
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> connectedDevices.add(device)
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -237,6 +234,11 @@ class DashBleService : Service() {
 
     private fun fail(reason: String) {
         try { advertiser?.stopAdvertising(advertiseCallback) } catch (_: Exception) {}
+        try { server?.clearServices(); server?.close() } catch (_: Exception) {}
+        advertiser = null
+        server = null
+        notifyingDevices.clear()
+        connectedDevices.clear()
         DashState.displayStarting = false
         DashState.displayRunning = false
         DashState.displayError = reason
