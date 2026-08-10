@@ -3,6 +3,7 @@ package com.duke.dash
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -47,12 +48,21 @@ class MainActivity : Activity() {
         requestRuntimePermissions()
         DashState.observe(observer)
         render()
+        maybeStartDisplayService()
     }
 
     override fun onResume() {
         super.onResume()
         DashNotificationListener.instance?.refreshActive()
+        maybeStartDisplayService()
         render()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 390 || requestCode == 391) {
+            maybeStartDisplayService()
+        }
     }
 
     override fun onDestroy() {
@@ -265,13 +275,22 @@ class MainActivity : Activity() {
         message.text = if (msg.app.isBlank()) "No new messages" else msg.text.ifBlank { "New message" }
         messageMeta.text = if (msg.app.isBlank()) "Supported messaging apps only" else msg.app.uppercase()
 
-        ble.text = if (DashState.phoneConnected) "●  DISPLAY CONNECTED" else "○  READY • WAITING FOR ESP32"
+        ble.text = if (DashState.phoneConnected) "●  DISPLAY CONNECTED" else "○  READY • WAITING FOR ESP32 / PC"
         ble.setTextColor(if (DashState.phoneConnected) green else text)
     }
 
     private fun startBleService() {
         val intent = Intent(this, DashBleService::class.java)
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+    }
+
+    private fun maybeStartDisplayService() {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val connectGranted = checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            val advertiseGranted = checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+            if (!connectGranted || !advertiseGranted) return
+        }
+        startBleService()
     }
 
     private fun requestRuntimePermissions() {
