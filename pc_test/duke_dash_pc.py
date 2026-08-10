@@ -1,7 +1,6 @@
 import asyncio
 import threading
 import tkinter as tk
-from tkinter import messagebox
 from bleak import BleakClient, BleakScanner
 
 SERVICE_UUID = "8f8a0001-5d3e-4d0a-9c7b-000000000001"
@@ -82,16 +81,27 @@ class DukeDashPC:
 
     async def _scan(self):
         try:
-            devices = await BleakScanner.discover(timeout=7.0)
-            target = next((d for d in devices if d.name and "Duke Dash" in d.name), None)
-            if target is None:
-                # Android may expose the device without a useful local name; service UUID is a fallback.
-                target = next((d for d in devices if SERVICE_UUID.lower() in {u.lower() for u in (d.metadata.get("uuids") or [])}), None)
+            # Request advertisement metadata as well as device objects. On Windows,
+            # service UUIDs are often exposed in AdvertisementData rather than
+            # device.metadata, especially when the UUID is in the scan response.
+            discovered = await BleakScanner.discover(timeout=8.0, return_adv=True)
+
+            target = None
+            for address, item in discovered.items():
+                device, adv = item
+                name = (device.name or adv.local_name or "").strip()
+                uuids = {u.lower() for u in (adv.service_uuids or [])}
+                if "duke dash" in name.lower() or SERVICE_UUID.lower() in uuids:
+                    target = device
+                    break
+
             if target is None:
                 self.root.after(0, lambda: self.status_var.set("○  DUKE DASH NOT FOUND — TAP RESCAN"))
                 self.root.after(0, lambda: self.retry.config(state="normal"))
                 return
+
             self.device = target
+            self.root.after(0, lambda d=target: self.status_var.set(f"●  FOUND {d.name or d.address} — CONNECTING…"))
             await self._connect(target)
         except Exception as exc:
             self.root.after(0, lambda e=str(exc): self.status_var.set(f"○  SCAN ERROR: {e}"))
