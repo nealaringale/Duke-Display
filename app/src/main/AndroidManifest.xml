@@ -10,6 +10,8 @@
     <application
         android:allowBackup="false"
         android:label="Duke Dash"
+        android:icon="@drawable/ic_duke_dash"
+        android:roundIcon="@drawable/ic_duke_dash"
         android:theme="@style/AppTheme">
 
         <activity android:name=".MainActivity" android:exported="true">
