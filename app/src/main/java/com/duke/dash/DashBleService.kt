@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import android.os.IBinder
 import android.util.Base64
 import java.nio.charset.StandardCharsets
@@ -179,7 +180,10 @@ class DashBleService : Service() {
                 return
             }
 
-            val service = BluetoothGattService(SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+            val service = BluetoothGattService(
+                SERVICE_UUID,
+                BluetoothGattService.SERVICE_TYPE_PRIMARY
+            )
             characteristic = BluetoothGattCharacteristic(
                 DATA_UUID,
                 BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
@@ -263,6 +267,7 @@ class DashBleService : Service() {
             .append(c.caller.replace('|', ' ')).append('\n')
     }
 
+    @Synchronized
     private fun sendState() {
         if (!::characteristic.isInitialized || notifyingDevices.isEmpty()) return
         val bytes = payload().toByteArray(StandardCharsets.UTF_8)
@@ -271,13 +276,18 @@ class DashBleService : Service() {
         val chunks = encoded.chunked(CHUNK_BYTES)
         val total = chunks.size
 
-        notifyingDevices.forEach { device ->
+        notifyingDevices.toList().forEach { device ->
             try {
                 chunks.forEachIndexed { index, chunk ->
                     val frame = "$FRAME_PREFIX|$frameId|${index + 1}|$total|$chunk"
                     val frameBytes = frame.toByteArray(StandardCharsets.UTF_8)
-                    characteristic.value = frameBytes
-                    server?.notifyCharacteristicChanged(device, characteristic, false, frameBytes)
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        server?.notifyCharacteristicChanged(device, characteristic, false, frameBytes)
+                    } else {
+                        characteristic.value = frameBytes
+                        @Suppress("DEPRECATION")
+                        server?.notifyCharacteristicChanged(device, characteristic, false)
+                    }
                 }
             } catch (_: Exception) {
                 notifyingDevices.remove(device)
