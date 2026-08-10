@@ -350,7 +350,9 @@ class MainActivity : Activity() {
             val advertiseGranted = checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
             if (!connectGranted || !advertiseGranted) return
         }
-        if (!DashState.displayRunning && !DashState.displayStarting) startBleService(false)
+        if (!DashState.displayRunning && !DashState.displayStarting && DashState.displayError.isBlank()) {
+            startBleService(false)
+        }
     }
 
     private fun requestRuntimePermissions() {
