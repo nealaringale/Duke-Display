@@ -107,11 +107,18 @@ class DashNotificationListener : NotificationListenerService() {
         try {
             mediaManager = getSystemService(MediaSessionManager::class.java)
             val component = ComponentName(this, DashNotificationListener::class.java)
-            mediaListener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
+
+            val listener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
+                attachBestController(controllers?.toList() ?: emptyList())
+            }
+            mediaListener = listener
+
+            mediaManager?.let { manager ->
+                manager.addOnActiveSessionsChangedListener(listener, component)
+                val controllers: List<MediaController> =
+                    manager.getActiveSessions(component)?.toList() ?: emptyList()
                 attachBestController(controllers)
             }
-            mediaManager?.addOnActiveSessionsChangedListener(mediaListener, component)
-            attachBestController(mediaManager?.getActiveSessions(component).orEmpty())
         } catch (_: SecurityException) {
             // Notification listener access is required for active media sessions.
         } catch (_: Exception) {
@@ -121,8 +128,13 @@ class DashNotificationListener : NotificationListenerService() {
 
     private fun attachBestController(controllers: List<MediaController>) {
         val controller = controllers
-            .sortedWith(compareByDescending<MediaController> { it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING }
-                .thenByDescending { it.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().isNotBlank() })
+            .sortedWith(
+                compareByDescending<MediaController> {
+                    it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+                }.thenByDescending {
+                    it.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().isNotBlank()
+                }
+            )
             .firstOrNull()
 
         if (controller?.sessionToken == activeController?.sessionToken) {
@@ -133,7 +145,7 @@ class DashNotificationListener : NotificationListenerService() {
         clearMediaController()
         activeController = controller
         controller?.let { c ->
-            controllerCallback = object : MediaController.Callback() {
+            val callback = object : MediaController.Callback() {
                 override fun onMetadataChanged(metadata: MediaMetadata?) = refreshMusic()
                 override fun onPlaybackStateChanged(state: android.media.session.PlaybackState?) = refreshMusic()
                 override fun onSessionDestroyed() {
@@ -143,7 +155,8 @@ class DashNotificationListener : NotificationListenerService() {
                     }
                 }
             }
-            try { c.registerCallback(controllerCallback) } catch (_: Exception) {}
+            controllerCallback = callback
+            try { c.registerCallback(callback) } catch (_: Exception) {}
         }
         refreshMusic()
     }
