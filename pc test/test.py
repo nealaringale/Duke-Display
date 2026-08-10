@@ -13,6 +13,8 @@ CARD = "#111111"
 TEXT = "#f7f7f7"
 MUTED = "#919191"
 GREEN = "#5cd274"
+RED = "#ff5c5c"
+AMBER = "#ffb000"
 
 
 def parse_payload(raw: str):
@@ -28,18 +30,9 @@ def parse_payload(raw: str):
                 distance = int(parts[2])
             except ValueError:
                 distance = -1
-            data["nav"] = {
-                "direction": parts[1],
-                "distance": distance,
-                "instruction": parts[3],
-                "road": parts[4],
-            }
+            data["nav"] = {"direction": parts[1], "distance": distance, "instruction": parts[3], "road": parts[4]}
         elif parts[0] == "MUSIC" and len(parts) >= 4:
-            data["music"] = {
-                "title": parts[1],
-                "artist": parts[2],
-                "state": parts[3],
-            }
+            data["music"] = {"title": parts[1], "artist": parts[2], "state": parts[3]}
         elif parts[0] == "MSG" and len(parts) >= 3:
             data["msg"] = {"app": parts[1], "text": parts[2]}
     return data
@@ -47,21 +40,13 @@ def parse_payload(raw: str):
 
 def direction_display(direction: str):
     arrows = {
-        "RIGHT": "↗  RIGHT",
-        "LEFT": "↖  LEFT",
-        "SLIGHT_RIGHT": "↗  SLIGHT RIGHT",
-        "SLIGHT_LEFT": "↖  SLIGHT LEFT",
-        "SHARP_RIGHT": "↗  SHARP RIGHT",
-        "SHARP_LEFT": "↖  SHARP LEFT",
-        "UTURN": "↶  U-TURN",
-        "KEEP_RIGHT": "↗  KEEP RIGHT",
-        "KEEP_LEFT": "↖  KEEP LEFT",
-        "ARRIVE": "●  ARRIVE",
-        "ROUNDABOUT": "↻  ROUNDABOUT",
-        "NORTH": "↑  HEAD NORTH",
-        "SOUTH": "↓  HEAD SOUTH",
-        "EAST": "→  HEAD EAST",
-        "WEST": "←  HEAD WEST",
+        "RIGHT": "↗  RIGHT", "LEFT": "↖  LEFT",
+        "SLIGHT_RIGHT": "↗  SLIGHT RIGHT", "SLIGHT_LEFT": "↖  SLIGHT LEFT",
+        "SHARP_RIGHT": "↗  SHARP RIGHT", "SHARP_LEFT": "↖  SHARP LEFT",
+        "UTURN": "↶  U-TURN", "KEEP_RIGHT": "↗  KEEP RIGHT", "KEEP_LEFT": "↖  KEEP LEFT",
+        "ARRIVE": "●  ARRIVE", "ROUNDABOUT": "↻  ROUNDABOUT",
+        "NORTH": "↑  HEAD NORTH", "SOUTH": "↓  HEAD SOUTH",
+        "EAST": "→  HEAD EAST", "WEST": "←  HEAD WEST",
     }
     return arrows.get(direction, "↑  STRAIGHT")
 
@@ -74,15 +59,13 @@ class DukeDashPC:
         self.root.minsize(650, 620)
         self.root.configure(bg=BG)
         self.connected = False
-        self.scanning = False
         self.stop_event = threading.Event()
-        self.loop = None
         self.client = None
+        self.loop = None
 
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure("TButton", background="#161616", foreground=TEXT,
-                        bordercolor="#303030", padding=10, font=("Segoe UI", 10, "bold"))
+        style.configure("TButton", background="#161616", foreground=TEXT, bordercolor="#303030", padding=10, font=("Segoe UI", 10, "bold"))
         style.map("TButton", background=[("active", "#252525")])
 
         self.build_ui()
@@ -95,20 +78,14 @@ class DukeDashPC:
 
         header = tk.Frame(outer, bg=BG)
         header.pack(fill="x")
-        logo = tk.Label(header, text="DD", bg=ORANGE, fg="white",
-                        font=("Segoe UI", 20, "bold"), width=4, height=2)
-        logo.pack(side="left", padx=(0, 14))
+        tk.Label(header, text="DD", bg=ORANGE, fg="white", font=("Segoe UI", 20, "bold"), width=4, height=2).pack(side="left", padx=(0, 14))
         title_box = tk.Frame(header, bg=BG)
         title_box.pack(side="left", fill="x", expand=True)
-        tk.Label(title_box, text="DUKE DASH", bg=BG, fg=TEXT,
-                 font=("Segoe UI", 26, "bold")).pack(anchor="w")
-        tk.Label(title_box, text="RIDE  •  CONNECT  •  KNOW", bg=BG, fg=MUTED,
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        tk.Label(header, text="PC TEST DISPLAY", bg="#161616", fg=MUTED,
-                 font=("Segoe UI", 9, "bold"), padx=12, pady=8).pack(side="right")
+        tk.Label(title_box, text="DUKE DASH", bg=BG, fg=TEXT, font=("Segoe UI", 26, "bold")).pack(anchor="w")
+        tk.Label(title_box, text="RIDE  •  CONNECT  •  KNOW", bg=BG, fg=MUTED, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        tk.Label(header, text="PC TEST DISPLAY", bg="#161616", fg=MUTED, font=("Segoe UI", 9, "bold"), padx=12, pady=8).pack(side="right")
 
-        self.status = tk.Label(outer, text="●  SCANNING FOR DUKE DASH...", bg=BG,
-                               fg=MUTED, font=("Segoe UI", 12, "bold"))
+        self.status = tk.Label(outer, text="●  SCANNING FOR DUKE DASH...", bg=BG, fg=MUTED, font=("Segoe UI", 12, "bold"))
         self.status.pack(anchor="w", pady=(18, 8))
 
         self.nav_card, self.nav_title, self.nav_meta = self.card(outer, "NAVIGATION")
@@ -117,23 +94,18 @@ class DukeDashPC:
 
         footer = tk.Frame(outer, bg=BG)
         footer.pack(fill="x", pady=(12, 0))
-        tk.Label(footer, text="PHONE  →  BLE  →  PC TEST DISPLAY", bg=BG,
-                 fg=MUTED, font=("Segoe UI", 10, "bold")).pack(side="left")
+        tk.Label(footer, text="PHONE  →  BLE  →  PC TEST DISPLAY", bg=BG, fg=MUTED, font=("Segoe UI", 10, "bold")).pack(side="left")
         ttk.Button(footer, text="RESCAN", command=self.rescan).pack(side="right")
 
     def card(self, parent, heading):
-        frame = tk.Frame(parent, bg=CARD, highlightbackground="#202020",
-                         highlightthickness=1)
+        frame = tk.Frame(parent, bg=CARD, highlightbackground="#202020", highlightthickness=1)
         frame.pack(fill="x", pady=8)
         inner = tk.Frame(frame, bg=CARD)
         inner.pack(fill="x", padx=20, pady=18)
-        tk.Label(inner, text=heading, bg=CARD, fg=ORANGE,
-                 font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        title = tk.Label(inner, text="—", bg=CARD, fg=TEXT,
-                         font=("Segoe UI", 25, "bold"), anchor="w", justify="left")
+        tk.Label(inner, text=heading, bg=CARD, fg=ORANGE, font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        title = tk.Label(inner, text="—", bg=CARD, fg=TEXT, font=("Segoe UI", 25, "bold"), anchor="w", justify="left")
         title.pack(fill="x", pady=(10, 4))
-        meta = tk.Label(inner, text="Waiting for phone data...", bg=CARD, fg=MUTED,
-                        font=("Segoe UI", 12), anchor="w", justify="left", wraplength=680)
+        meta = tk.Label(inner, text="Waiting for phone data...", bg=CARD, fg=MUTED, font=("Segoe UI", 12), anchor="w", justify="left", wraplength=680)
         meta.pack(fill="x")
         return frame, title, meta
 
@@ -147,58 +119,68 @@ class DukeDashPC:
         try:
             self.loop.run_until_complete(self.scan_and_connect())
         except Exception as exc:
-            self.ui_status(f"●  BLE ERROR: {exc}", "#ff5c5c")
+            self.ui_status(f"●  BLE ERROR: {exc}", RED)
         finally:
             self.loop.close()
 
     async def scan_and_connect(self):
+        # return_adv=True is more reliable on Windows than relying only on
+        # the live detection callback. It lets us inspect the service UUID
+        # actually advertised by the Android phone.
         while not self.stop_event.is_set():
             self.ui_status("●  SCANNING FOR DUKE DASH...", MUTED)
             target = None
+            seen = []
 
-            def detection_callback(device, advertisement_data):
-                nonlocal target
-                uuids = [u.lower() for u in (advertisement_data.service_uuids or [])]
-                name = (device.name or advertisement_data.local_name or "").lower()
-                if SERVICE_UUID.lower() in uuids or "duke" in name:
-                    target = device
-
-            scanner = BleakScanner(detection_callback=detection_callback)
             try:
-                await scanner.start()
-                for _ in range(120):
-                    if self.stop_event.is_set() or target is not None:
+                devices = await BleakScanner.discover(timeout=8.0, return_adv=True)
+                for device, advertisement in devices.values():
+                    name = device.name or getattr(advertisement, "local_name", None) or ""
+                    service_uuids = [str(u).lower() for u in (getattr(advertisement, "service_uuids", None) or [])]
+                    seen.append(name or device.address)
+
+                    # Exact service match is the authoritative match.
+                    # Name match is a fallback for stacks that hide service UUIDs.
+                    if SERVICE_UUID.lower() in service_uuids or "duke dash" in name.lower():
+                        target = device
                         break
-                    await asyncio.sleep(0.25)
-            finally:
-                await scanner.stop()
+            except Exception as exc:
+                self.ui_status(f"●  BLE SCAN ERROR: {exc}", RED)
+                await asyncio.sleep(2)
+                continue
 
             if self.stop_event.is_set():
                 return
 
             if target is None:
-                self.ui_status("●  DUKE DASH NOT FOUND — TAP RESCAN", "#ffb000")
-                await asyncio.sleep(2)
+                if seen:
+                    sample = ", ".join(seen[:4])
+                    self.ui_status(f"●  DUKE DASH NOT FOUND — SEEN: {sample}", AMBER)
+                else:
+                    self.ui_status("●  NO BLE DEVICES FOUND — CHECK PC BLUETOOTH", AMBER)
+                await asyncio.sleep(1)
                 continue
 
-            self.ui_status(f"●  FOUND {target.name or target.address} — CONNECTING...", "#ffb000")
+            self.ui_status(f"●  FOUND {target.name or target.address} — CONNECTING...", AMBER)
             try:
                 async with BleakClient(target, disconnected_callback=self.on_disconnected) as client:
                     self.client = client
                     self.connected = True
                     self.ui_status("●  PHONE DATA LIVE", GREEN)
                     await client.start_notify(DATA_UUID, self.notification_handler)
-                    # Read once immediately, then notifications keep it live.
+
+                    # Read the current snapshot immediately. Notifications then keep it live.
                     try:
                         value = await client.read_gatt_char(DATA_UUID)
                         self.notification_handler(DATA_UUID, value)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self.ui_status(f"●  CONNECTED — LIVE DATA WAITING ({exc})", AMBER)
+
                     while client.is_connected and not self.stop_event.is_set():
                         await asyncio.sleep(0.5)
             except Exception as exc:
                 self.connected = False
-                self.ui_status(f"●  CONNECTION ERROR: {exc}", "#ff5c5c")
+                self.ui_status(f"●  CONNECTION ERROR: {exc}", RED)
                 await asyncio.sleep(2)
             finally:
                 self.client = None
@@ -210,11 +192,11 @@ class DukeDashPC:
             data = parse_payload(raw)
             self.root.after(0, self.update_display, data)
         except Exception as exc:
-            self.ui_status(f"●  DATA ERROR: {exc}", "#ff5c5c")
+            self.ui_status(f"●  DATA ERROR: {exc}", RED)
 
     def on_disconnected(self, _client):
         self.connected = False
-        self.ui_status("○  PHONE DISCONNECTED — RECONNECTING...", "#ffb000")
+        self.ui_status("○  PHONE DISCONNECTED — RECONNECTING...", AMBER)
 
     def update_display(self, data):
         nav = data["nav"]
@@ -236,9 +218,7 @@ class DukeDashPC:
         artist = music.get("artist", "")
         state = music.get("state", "")
         self.music_title.config(text=title if title else "No active music")
-        self.music_meta.config(
-            text=f"{artist or 'Unknown artist'}  •  {state}" if title else "Start music on your phone"
-        )
+        self.music_meta.config(text=f"{artist or 'Unknown artist'}  •  {state}" if title else "Start music on your phone")
 
         msg = data["msg"]
         if msg.get("app"):
@@ -255,7 +235,6 @@ class DukeDashPC:
             pass
 
     def rescan(self):
-        # The worker continuously retries, so this simply wakes the user-facing state.
         self.ui_status("●  RESCANNING FOR DUKE DASH...", MUTED)
 
     def close(self):
