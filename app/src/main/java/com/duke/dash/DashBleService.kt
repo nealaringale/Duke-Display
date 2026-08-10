@@ -244,6 +244,7 @@ class DashBleService : Service() {
         DashState.displayError = reason
         DashState.phoneConnected = false
         DashState.changed()
+        stopSelf()
     }
 
     private fun payload(): String = buildString {
