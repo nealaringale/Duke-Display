@@ -61,7 +61,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 390 || requestCode == 391) maybeStartDisplayService()
+        if (requestCode == 390) maybeStartDisplayService()
     }
 
     override fun onDestroy() {
@@ -313,17 +313,13 @@ class MainActivity : Activity() {
     }
 
     private fun requestRuntimePermissions() {
-        if (Build.VERSION.SDK_INT >= 31) {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(
-                    Manifest.permission.BLUETOOTH_CONNECT,
-                    Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_ADVERTISE,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ),
-                390
-            )
-        }
+        if (Build.VERSION.SDK_INT < 31) return
+        val permissions = mutableListOf(
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_ADVERTISE
+        )
+        if (Build.VERSION.SDK_INT >= 33) permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 390)
     }
 }
