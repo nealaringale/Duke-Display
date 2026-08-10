@@ -12,8 +12,6 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.view.animation.AlphaAnimation
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -39,6 +37,7 @@ class MainActivity : Activity() {
     private val muted = Color.rgb(145, 145, 145)
     private val green = Color.rgb(92, 210, 116)
     private val red = Color.rgb(255, 92, 92)
+    private val amber = Color.rgb(255, 176, 0)
 
     private val observer: () -> Unit = { runOnUiThread { render() } }
 
@@ -62,9 +61,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 390 || requestCode == 391) {
-            maybeStartDisplayService()
-        }
+        if (requestCode == 390 || requestCode == 391) maybeStartDisplayService()
     }
 
     override fun onDestroy() {
@@ -94,9 +91,7 @@ class MainActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(20), dp(18), dp(20), dp(18))
         background = rounded(card, 18)
-        layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
-            setMargins(0, dp(8), 0, dp(8))
-        }
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(8), 0, dp(8)) }
     }
 
     private fun buildUi() {
@@ -110,25 +105,18 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-
         val logo = ImageView(this).apply {
             setImageResource(com.duke.dash.R.drawable.ic_duke_dash)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             background = rounded(orange, 16)
             setPadding(dp(10), dp(10), dp(10), dp(10))
-            layoutParams = LinearLayout.LayoutParams(dp(58), dp(58)).apply {
-                setMargins(0, 0, dp(14), 0)
-            }
+            layoutParams = LinearLayout.LayoutParams(dp(58), dp(58)).apply { setMargins(0, 0, dp(14), 0) }
         }
         header.addView(logo)
 
-        val titleBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
+        val titleBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         titleBox.addView(label("DUKE DASH", 25f, text, true))
-        titleBox.addView(label("RIDE  •  CONNECT  •  KNOW", 10f, muted, true).apply {
-            setPadding(0, dp(5), 0, 0)
-        })
+        titleBox.addView(label("RIDE  •  CONNECT  •  KNOW", 10f, muted, true).apply { setPadding(0, dp(5), 0, 0) })
         header.addView(titleBox, LinearLayout.LayoutParams(0, -2, 1f))
 
         val version = label("V1", 10f, muted, true).apply {
@@ -139,16 +127,12 @@ class MainActivity : Activity() {
         header.addView(version)
         root.addView(header)
 
-        status = label("", 12f, muted, true).apply {
-            setPadding(dp(2), dp(16), 0, dp(5))
-        }
+        status = label("", 12f, muted, true).apply { setPadding(dp(2), dp(16), 0, dp(5)) }
         root.addView(status)
 
         val navCard = cardView()
         navCard.addView(label("NAVIGATION", 11f, orange, true))
-        nav = label("—", 31f, text, true).apply {
-            setPadding(0, dp(10), 0, dp(5))
-        }
+        nav = label("—", 31f, text, true).apply { setPadding(0, dp(10), 0, dp(5)) }
         navCard.addView(nav)
         navMeta = label("Waiting for Google Maps…", 14f, muted)
         navCard.addView(navMeta)
@@ -156,9 +140,7 @@ class MainActivity : Activity() {
 
         val musicCard = cardView()
         musicCard.addView(label("NOW PLAYING", 11f, orange, true))
-        music = label("No active music", 19f, text, true).apply {
-            setPadding(0, dp(10), 0, dp(5))
-        }
+        music = label("No active music", 19f, text, true).apply { setPadding(0, dp(10), 0, dp(5)) }
         musicCard.addView(music)
         musicMeta = label("Start music on your phone", 13f, muted)
         musicCard.addView(musicMeta)
@@ -166,9 +148,7 @@ class MainActivity : Activity() {
 
         val messageCard = cardView()
         messageCard.addView(label("MESSAGING", 11f, orange, true))
-        message = label("No new messages", 17f, text, true).apply {
-            setPadding(0, dp(10), 0, dp(5))
-        }
+        message = label("No new messages", 17f, text, true).apply { setPadding(0, dp(10), 0, dp(5)) }
         messageCard.addView(message)
         messageMeta = label("Supported messaging apps only", 13f, muted)
         messageCard.addView(messageMeta)
@@ -176,9 +156,7 @@ class MainActivity : Activity() {
 
         val bleCard = cardView()
         bleCard.addView(label("DISPLAY LINK", 11f, orange, true))
-        ble = label("○  DISPLAY OFF", 15f, text, true).apply {
-            setPadding(0, dp(10), 0, 0)
-        }
+        ble = label("○  DISPLAY OFF", 15f, text, true).apply { setPadding(0, dp(10), 0, 0) }
         bleCard.addView(ble)
         root.addView(bleCard)
 
@@ -223,17 +201,7 @@ class MainActivity : Activity() {
                 onClick()
             }.start()
         }
-        layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
-            setMargins(0, 0, dp(7), 0)
-        }
-    }
-
-    private fun flash(view: View) {
-        val anim = AlphaAnimation(0.72f, 1f).apply {
-            duration = 180
-            repeatCount = 0
-        }
-        view.startAnimation(anim)
+        layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, dp(7), 0) }
     }
 
     private fun render() {
@@ -242,37 +210,26 @@ class MainActivity : Activity() {
         status.setTextColor(if (listenerReady) green else muted)
 
         val n = DashState.navigation
-        nav.text = when {
-            n.direction == "RIGHT" -> "↗  RIGHT"
-            n.direction == "LEFT" -> "↖  LEFT"
-            n.direction == "SLIGHT_RIGHT" -> "↗  SLIGHT RIGHT"
-            n.direction == "SLIGHT_LEFT" -> "↖  SLIGHT LEFT"
-            n.direction == "SHARP_RIGHT" -> "↗  SHARP RIGHT"
-            n.direction == "SHARP_LEFT" -> "↖  SHARP LEFT"
-            n.direction == "UTURN" -> "↶  U-TURN"
-            n.direction == "KEEP_RIGHT" -> "↗  KEEP RIGHT"
-            n.direction == "KEEP_LEFT" -> "↖  KEEP LEFT"
-            n.direction == "ARRIVE" -> "●  ARRIVE"
-            n.direction == "ROUNDABOUT" -> "↻  ROUNDABOUT"
-            n.direction == "NORTH" -> "↑  HEAD NORTH"
-            n.direction == "SOUTH" -> "↓  HEAD SOUTH"
-            n.direction == "EAST" -> "→  HEAD EAST"
-            n.direction == "WEST" -> "←  HEAD WEST"
+        nav.text = when (n.direction) {
+            "RIGHT" -> "↗  RIGHT"; "LEFT" -> "↖  LEFT"
+            "SLIGHT_RIGHT" -> "↗  SLIGHT RIGHT"; "SLIGHT_LEFT" -> "↖  SLIGHT LEFT"
+            "SHARP_RIGHT" -> "↗  SHARP RIGHT"; "SHARP_LEFT" -> "↖  SHARP LEFT"
+            "UTURN" -> "↶  U-TURN"; "KEEP_RIGHT" -> "↗  KEEP RIGHT"; "KEEP_LEFT" -> "↖  KEEP LEFT"
+            "ARRIVE" -> "●  ARRIVE"; "ROUNDABOUT" -> "↻  ROUNDABOUT"
+            "NORTH" -> "↑  HEAD NORTH"; "SOUTH" -> "↓  HEAD SOUTH"; "EAST" -> "→  HEAD EAST"; "WEST" -> "←  HEAD WEST"
             else -> "↑  STRAIGHT"
         }
         navMeta.text = buildString {
             if (n.distanceMeters != null && n.distanceMeters >= 0) append("${n.distanceMeters} m  •  ")
             append(if (n.instruction.isNotBlank()) n.instruction else "Waiting for Google Maps…")
             if (n.road.isNotBlank()) append("\n${n.road}")
+            if (n.eta.isNotBlank()) append("\nETA ${n.eta}")
+            if (n.destinationDistanceMeters != null && n.destinationDistanceMeters >= 0) append("  •  DEST ${n.destinationDistanceMeters} m")
         }
 
         val m = DashState.music
         music.text = if (m.title.isBlank()) "No active music" else m.title
-        musicMeta.text = if (m.title.isBlank()) {
-            "Start music on your phone"
-        } else {
-            "${m.artist.ifBlank { "Unknown artist" }}  •  ${if (m.playing) "PLAYING" else "PAUSED"}"
-        }
+        musicMeta.text = if (m.title.isBlank()) "Start music on your phone" else "${m.artist.ifBlank { "Unknown artist" }}  •  ${if (m.playing) "PLAYING" else "PAUSED"}"
 
         val msg = DashState.message
         message.text = if (msg.app.isBlank()) "No new messages" else msg.text.ifBlank { "New message" }
@@ -284,8 +241,8 @@ class MainActivity : Activity() {
                 ble.setTextColor(green)
             }
             DashState.displayRunning -> {
-                ble.text = "●  DISPLAY LINK RUNNING"
-                ble.setTextColor(green)
+                ble.text = "●  DISPLAY LINK RUNNING • WAITING FOR DISPLAY"
+                ble.setTextColor(amber)
             }
             DashState.displayStarting -> {
                 ble.text = "◌  STARTING DISPLAY LINK…"
@@ -307,7 +264,7 @@ class MainActivity : Activity() {
                 startButton.isEnabled = false
             }
             DashState.displayRunning -> {
-                startButton.text = "DISPLAY STARTED"
+                startButton.text = "DISPLAY ADVERTISING"
                 startButton.isEnabled = false
             }
             DashState.displayStarting -> {
@@ -367,8 +324,6 @@ class MainActivity : Activity() {
                 ),
                 390
             )
-        } else if (Build.VERSION.SDK_INT >= 33) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 391)
         }
     }
 }
