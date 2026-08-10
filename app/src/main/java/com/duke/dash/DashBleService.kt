@@ -23,7 +23,6 @@ class DashBleService : Service() {
     private var advertiser: BluetoothLeAdvertiser? = null
     private lateinit var characteristic: BluetoothGattCharacteristic
     private val clients = CopyOnWriteArraySet<BluetoothDevice>()
-    private var gattService: BluetoothGattService? = null
 
     private val observer: () -> Unit = { sendState() }
 
@@ -47,10 +46,7 @@ class DashBleService : Service() {
     private val callback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
             if (status != BluetoothGatt.GATT_SUCCESS || service?.uuid != SERVICE_UUID) {
-                DashState.displayStarting = false
-                DashState.displayRunning = false
-                DashState.displayError = "BLE service setup error $status"
-                DashState.changed()
+                fail("BLE service setup error $status")
                 return
             }
             startAdvertising()
@@ -146,7 +142,6 @@ class DashBleService : Service() {
                 SERVICE_UUID,
                 BluetoothGattService.SERVICE_TYPE_PRIMARY
             )
-            gattService = service
 
             characteristic = BluetoothGattCharacteristic(
                 DATA_UUID,
@@ -161,11 +156,9 @@ class DashBleService : Service() {
             )
             service.addCharacteristic(characteristic)
 
-            val added = server?.addService(service) ?: false
-            if (!added) {
+            if (server?.addService(service) != true) {
                 fail("Could not register BLE service")
             }
-            // Advertising starts from onServiceAdded(). Android registers GATT services asynchronously.
         } catch (security: SecurityException) {
             fail("Bluetooth permission denied")
         } catch (error: Exception) {
@@ -186,17 +179,25 @@ class DashBleService : Service() {
         try {
             val settings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
                 .setConnectable(true)
                 .setTimeout(0)
                 .build()
 
+            // Keep the primary BLE advertisement small. A phone's Bluetooth
+            // name can be long enough to make the legacy packet too large.
             val data = AdvertiseData.Builder()
-                .setIncludeDeviceName(true)
+                .setIncludeDeviceName(false)
                 .addServiceUuid(android.os.ParcelUuid(SERVICE_UUID))
                 .build()
 
-            bleAdvertiser.startAdvertising(settings, data, advertiseCallback)
+            // The name can be returned in the scan response without consuming
+            // the primary packet space needed for the service UUID.
+            val scanResponse = AdvertiseData.Builder()
+                .setIncludeDeviceName(true)
+                .build()
+
+            bleAdvertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
         } catch (security: SecurityException) {
             fail("Bluetooth advertise permission denied")
         } catch (error: Exception) {
