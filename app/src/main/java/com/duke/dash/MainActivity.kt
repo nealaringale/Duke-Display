@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     private lateinit var message: TextView
     private lateinit var messageMeta: TextView
     private lateinit var ble: TextView
+    private lateinit var startButton: TextView
 
     private val orange = Color.rgb(255, 101, 0)
     private val bg = Color.rgb(5, 5, 5)
@@ -37,6 +38,7 @@ class MainActivity : Activity() {
     private val text = Color.rgb(247, 247, 247)
     private val muted = Color.rgb(145, 145, 145)
     private val green = Color.rgb(92, 210, 116)
+    private val red = Color.rgb(255, 92, 92)
 
     private val observer: () -> Unit = { runOnUiThread { render() } }
 
@@ -174,7 +176,7 @@ class MainActivity : Activity() {
 
         val bleCard = cardView()
         bleCard.addView(label("DISPLAY LINK", 11f, orange, true))
-        ble = label("○  READY • WAITING FOR ESP32", 15f, text, true).apply {
+        ble = label("○  DISPLAY OFF", 15f, text, true).apply {
             setPadding(0, dp(10), 0, 0)
         }
         bleCard.addView(ble)
@@ -188,7 +190,8 @@ class MainActivity : Activity() {
         actions.addView(action("NOTIFICATION ACCESS") {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         })
-        actions.addView(action("START DISPLAY") { startBleService() })
+        startButton = action("START DISPLAY") { startBleService(true) }
+        actions.addView(startButton)
         root.addView(actions)
 
         root.addView(label(
@@ -275,13 +278,70 @@ class MainActivity : Activity() {
         message.text = if (msg.app.isBlank()) "No new messages" else msg.text.ifBlank { "New message" }
         messageMeta.text = if (msg.app.isBlank()) "Supported messaging apps only" else msg.app.uppercase()
 
-        ble.text = if (DashState.phoneConnected) "●  DISPLAY CONNECTED" else "○  READY • WAITING FOR ESP32 / PC"
-        ble.setTextColor(if (DashState.phoneConnected) green else text)
+        when {
+            DashState.phoneConnected -> {
+                ble.text = "●  DISPLAY CONNECTED"
+                ble.setTextColor(green)
+            }
+            DashState.displayRunning -> {
+                ble.text = "●  DISPLAY LINK RUNNING"
+                ble.setTextColor(green)
+            }
+            DashState.displayStarting -> {
+                ble.text = "◌  STARTING DISPLAY LINK…"
+                ble.setTextColor(orange)
+            }
+            DashState.displayError.isNotBlank() -> {
+                ble.text = "×  DISPLAY FAILED • RETRY"
+                ble.setTextColor(red)
+            }
+            else -> {
+                ble.text = "○  DISPLAY OFF"
+                ble.setTextColor(text)
+            }
+        }
+
+        when {
+            DashState.phoneConnected -> {
+                startButton.text = "DISPLAY CONNECTED"
+                startButton.isEnabled = false
+            }
+            DashState.displayRunning -> {
+                startButton.text = "DISPLAY STARTED"
+                startButton.isEnabled = false
+            }
+            DashState.displayStarting -> {
+                startButton.text = "STARTING…"
+                startButton.isEnabled = false
+            }
+            DashState.displayError.isNotBlank() -> {
+                startButton.text = "RETRY DISPLAY"
+                startButton.isEnabled = true
+            }
+            else -> {
+                startButton.text = "START DISPLAY"
+                startButton.isEnabled = true
+            }
+        }
+        startButton.alpha = if (startButton.isEnabled) 1f else 0.7f
     }
 
-    private fun startBleService() {
-        val intent = Intent(this, DashBleService::class.java)
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+    private fun startBleService(manual: Boolean = false) {
+        if (manual) {
+            DashState.displayError = ""
+            DashState.displayStarting = true
+            DashState.displayRunning = false
+            DashState.changed()
+        }
+        try {
+            val intent = Intent(this, DashBleService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+        } catch (e: Exception) {
+            DashState.displayStarting = false
+            DashState.displayRunning = false
+            DashState.displayError = e.javaClass.simpleName
+            DashState.changed()
+        }
     }
 
     private fun maybeStartDisplayService() {
@@ -290,7 +350,9 @@ class MainActivity : Activity() {
             val advertiseGranted = checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
             if (!connectGranted || !advertiseGranted) return
         }
-        startBleService()
+        if (!DashState.displayRunning && !DashState.displayStarting && DashState.displayError.isBlank()) {
+            startBleService(false)
+        }
     }
 
     private fun requestRuntimePermissions() {

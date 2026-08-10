@@ -11,6 +11,9 @@ object DashState {
     @Volatile var music=MusicState()
     @Volatile var message=MessageState()
     @Volatile var phoneConnected=false
+    @Volatile var displayRunning=false
+    @Volatile var displayStarting=false
+    @Volatile var displayError=""
     private val listeners=CopyOnWriteArraySet<()->Unit>()
     fun observe(listener:()->Unit){listeners.add(listener)}
     fun remove(listener:()->Unit){listeners.remove(listener)}
