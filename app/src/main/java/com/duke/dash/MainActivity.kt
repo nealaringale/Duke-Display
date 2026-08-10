@@ -94,7 +94,6 @@ class MainActivity : Activity() {
             setBackgroundColor(bg)
         }
 
-        // Premium compact header.
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -133,7 +132,6 @@ class MainActivity : Activity() {
         }
         root.addView(status)
 
-        // Navigation card — deliberately the visual priority.
         val navCard = cardView()
         navCard.addView(label("NAVIGATION", 11f, orange, true))
         nav = label("—", 31f, text, true).apply {
@@ -203,7 +201,7 @@ class MainActivity : Activity() {
         textSize = 11f
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
         gravity = Gravity.CENTER
-        setTextColor(text)
+        setTextColor(this@MainActivity.text)
         background = rounded(card2, 12, Color.rgb(45, 45, 45))
         setPadding(dp(12), dp(14), dp(12), dp(14))
         setOnClickListener {
